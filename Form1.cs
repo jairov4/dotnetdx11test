@@ -12,13 +12,16 @@ namespace DiscoveringDirect3D11
 {
 	public partial class MainForm : Form
 	{
-		private const int vertexSize = sizeof (float)*5;
+		private const int vertexSize = sizeof (float)*2;
 		private Texture2D backBuffer;
 		private Device device11;
 		private Effect effect;
 		private InputLayout layout;
 		private RenderTargetView renderTargetView;
 		private SwapChain swapChain;
+		private Buffer indicesb2;
+		private Buffer indicesb1;
+		private const int featureCount = 150000;
 
 		public MainForm()
 		{
@@ -43,6 +46,8 @@ namespace DiscoveringDirect3D11
 				effect.Dispose();
 				renderTargetView.Dispose();
 				backBuffer.Dispose();
+				indicesb1.Dispose();
+				indicesb2.Dispose();
 				swapChain.Dispose();
 				device11.Dispose();
 				device11 = null;
@@ -63,6 +68,10 @@ namespace DiscoveringDirect3D11
 			Render();
 		}
 
+		protected override void OnPaintBackground(PaintEventArgs e)
+		{
+		}
+
 		internal void Render()
 		{
 			if (device11 == null)
@@ -70,15 +79,28 @@ namespace DiscoveringDirect3D11
 				return;
 			}
 
-			var projectionMatrix = Matrix.Translation(50.0f * 2.0f / (float)ClientSize.Width, 0, 0);
-			effect.GetVariableByName("finalMatrix").AsMatrix().SetMatrix(projectionMatrix);
+			//AffectConstants();
 
 			// Render
 			device11.ImmediateContext.ClearRenderTargetView(renderTargetView, new Color4(1.0f, 0, 0, 1.0f));
-			
+
+			effect.GetVariableByName("color").AsVector().Set(new Color4(1.0f, 1.0f, 1.0f));
 			effect.GetTechniqueByIndex(0).GetPassByIndex(0).Apply(device11.ImmediateContext);
-			device11.ImmediateContext.DrawIndexed(6, 0, 0);
+
+			device11.ImmediateContext.InputAssembler.SetIndexBuffer(indicesb1, Format.R32_UInt, 0);
+			device11.ImmediateContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
+			device11.ImmediateContext.DrawIndexed(featureCount*6, 0, 0);
+
+			effect.GetVariableByName("color").AsVector().Set(new Color4(0.0f, 0.0f, 0.0f));
+			effect.GetTechniqueByIndex(0).GetPassByIndex(0).Apply(device11.ImmediateContext);
+
+			device11.ImmediateContext.InputAssembler.SetIndexBuffer(indicesb2, Format.R32_UInt, 0);
+			device11.ImmediateContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.LineList;
+			device11.ImmediateContext.DrawIndexed(featureCount*8, 0, 0);
+
 			swapChain.Present(0, PresentFlags.None);
+
+			Invalidate();
 		}
 		
 		private void CreateDeviceAndSwapChain()
@@ -117,16 +139,6 @@ namespace DiscoveringDirect3D11
 
 		private void AffectConstants()
 		{
-			// Texture
-			var texture2D = Texture2D.FromFile(device11, "yoda.jpg");
-			var view = new ShaderResourceView(device11, texture2D);
-
-			effect.GetVariableByName("yodaTexture").AsResource().SetResource(view);
-
-			var rasterizerStateDescription = new RasterizerStateDescription {CullMode = CullMode.None, FillMode = FillMode.Solid};
-
-			device11.ImmediateContext.Rasterizer.State = RasterizerState.FromDescription(device11, rasterizerStateDescription);
-
 			// Matrices
 			//var worldMatrix = Matrix.RotationY(0.5f);
 			//var viewMatrix = Matrix.Translation(0, 0, 5.0f);
@@ -134,7 +146,9 @@ namespace DiscoveringDirect3D11
 			//var projectionMatrix = Matrix.PerspectiveFovLH(fov, ClientSize.Width/(float) ClientSize.Height, 0.1f, 1000.0f);
 			//effect.GetVariableByName("finalMatrix").AsMatrix().SetMatrix(worldMatrix * viewMatrix * projectionMatrix);
 			
-			var projectionMatrix = Matrix.Translation(50.0f * 2.0f / (float)ClientSize.Width, 0, 0);
+			// Matrix.Translation(50.0f * 2.0f / (float)ClientSize.Width, 0, 0);
+			var projectionMatrix = Matrix.Scaling(2.0f/250000.0f, 2.0f/(2*(float) Math.PI), 1.0f)*
+									Matrix.Translation(-1f, -1f, 0.0f);
 			effect.GetVariableByName("finalMatrix").AsMatrix().SetMatrix(projectionMatrix);
 		}
 
@@ -149,48 +163,45 @@ namespace DiscoveringDirect3D11
 			var pass = technique.GetPassByIndex(0);
 			layout = new InputLayout(device11, pass.Description.Signature, new[]
 			{
-				new InputElement("POSITION", 0, Format.R32G32B32_Float, 0, 0),
-				new InputElement("TEXCOORD", 0, Format.R32G32_Float, 12, 0)
+				new InputElement("POSITION", 0, Format.R32G32_Float, 0, 0)
 			});
+
+			// Texture
+			var rasterizerStateDescription = new RasterizerStateDescription { CullMode = CullMode.None, FillMode = FillMode.Solid };
+
+			var rstate = RasterizerState.FromDescription(device11, rasterizerStateDescription);
+			device11.ImmediateContext.Rasterizer.State = rstate;
+			rstate.Dispose();
 		}
 
 		private void CreateGeometry()
 		{
-			float[] vertices =
-			{
-				-1.0f, -1.0f, 0f, 0f, 1.0f,
-				1.0f, -1.0f, 0f, 1.0f, 1.0f,
-				1.0f, 1.0f, 0f, 1.0f, 0.0f,
-				-1.0f, 1.0f, 0f, 0.0f, 0.0f
-			};
-
-			short[] faces =
-			{
-				(short) 0, (short) 1, (short) 2,
-				(short) 0, (short) 2, (short) 3
-			};
-
-			var featureCount = 50;
-			var vertices2 = new float[featureCount*4];
-			var indices2 = new float[featureCount*6];
-
 			var rnd = new Random();
-			for (var i = 0; i < 5000000;)
+
+			var vertices2 = new float[featureCount*4*2];
+			for (var i = 0; i < vertices2.Length;)
 			{
 				var x = (float)rnd.NextDouble() * 250000;
-				var y = (float)rnd.NextDouble() * 250000;
-				var w = (float)rnd.NextDouble() * 3;
-				var h = (float)rnd.NextDouble() * (float)Math.PI * 2;
-
+				var y = (float)rnd.NextDouble() * (float)Math.PI * 2;
+				var w = (float)rnd.NextDouble() * 300;
+				var h = (float)rnd.NextDouble() * (float)Math.PI * 2 / 20.0f;
+				
 				vertices2[i++] = x;
 				vertices2[i++] = y;
-				vertices2[i++] = w;
-				vertices2[i++] = h;
-			}
 
+				vertices2[i++] = x + w;
+				vertices2[i++] = y;
+
+				vertices2[i++] = x;
+				vertices2[i++] = y + h;
+
+				vertices2[i++] = x + w;
+				vertices2[i++] = y + h;
+			}
+			
 			// Creating vertex buffer
-			var stream = new DataStream(4*vertexSize, true, true);
-			stream.WriteRange(vertices);
+			var stream = new DataStream(featureCount * 4 * vertexSize, true, true);
+			stream.WriteRange(vertices2);
 			stream.Position = 0;
 
 			var vertexBuffer = new Buffer(device11, stream, new BufferDescription
@@ -198,17 +209,31 @@ namespace DiscoveringDirect3D11
 				BindFlags = BindFlags.VertexBuffer,
 				CpuAccessFlags = CpuAccessFlags.None,
 				OptionFlags = ResourceOptionFlags.None,
-				SizeInBytes = (int) stream.Length,
+				SizeInBytes = (int)stream.Length,
 				Usage = ResourceUsage.Default
 			});
 			stream.Dispose();
 
+			// for quads, 6 indices per feature
+
+			var indices1 = new int[featureCount * 6];
+			for (int j = 0; j < featureCount; j++)
+			{
+				indices1[j * 6 + 0] = j * 4 + 0;
+				indices1[j * 6 + 1] = j * 4 + 1;
+				indices1[j * 6 + 2] = j * 4 + 2;
+
+				indices1[j * 6 + 3] = j * 4 + 1;
+				indices1[j * 6 + 4] = j * 4 + 2;
+				indices1[j * 6 + 5] = j * 4 + 3;
+			}
+			
 			// Index buffer
-			stream = new DataStream(6*2, true, true);
-			stream.WriteRange(faces);
+			stream = new DataStream(featureCount*6*sizeof (int), true, true);
+			stream.WriteRange(indices1);
 			stream.Position = 0;
 
-			var indices = new Buffer(device11, stream, new BufferDescription
+			indicesb1 = new Buffer(device11, stream, new BufferDescription
 			{
 				BindFlags = BindFlags.IndexBuffer,
 				CpuAccessFlags = CpuAccessFlags.None,
@@ -218,11 +243,44 @@ namespace DiscoveringDirect3D11
 			});
 			stream.Dispose();
 
+			// for lines, 8 indices per feature
+
+			var indices2 = new int[featureCount * 8];
+			for (int j = 0; j < featureCount; j++)
+			{
+				indices2[j * 8 + 0] = j * 4 + 0;
+				indices2[j * 8 + 1] = j * 4 + 1;
+
+				indices2[j * 8 + 2] = j * 4 + 1;
+				indices2[j * 8 + 3] = j * 4 + 3;
+
+				indices2[j * 8 + 4] = j * 4 + 3;
+				indices2[j * 8 + 5] = j * 4 + 2;
+
+				indices2[j * 8 + 6] = j * 4 + 2;
+				indices2[j * 8 + 7] = j * 4 + 0;
+			}
+
+			// Index buffer
+			stream = new DataStream(featureCount * 8 * sizeof(int), true, true);
+			stream.WriteRange(indices2);
+			stream.Position = 0;
+
+			indicesb2 = new Buffer(device11, stream, new BufferDescription
+			{
+				BindFlags = BindFlags.IndexBuffer,
+				CpuAccessFlags = CpuAccessFlags.None,
+				OptionFlags = ResourceOptionFlags.None,
+				SizeInBytes = (int)stream.Length,
+				Usage = ResourceUsage.Default
+			});
+			stream.Dispose();
+
 			// Uploading to the device
 			device11.ImmediateContext.InputAssembler.InputLayout = layout;
-			device11.ImmediateContext.InputAssembler.PrimitiveTopology = PrimitiveTopology.TriangleList;
+
 			device11.ImmediateContext.InputAssembler.SetVertexBuffers(0, new VertexBufferBinding(vertexBuffer, vertexSize, 0));
-			device11.ImmediateContext.InputAssembler.SetIndexBuffer(indices, Format.R16_UInt, 0);
+			vertexBuffer.Dispose();
 		}
 
 		private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
@@ -231,6 +289,8 @@ namespace DiscoveringDirect3D11
 			effect.Dispose();
 			renderTargetView.Dispose();
 			backBuffer.Dispose();
+			indicesb1.Dispose();
+			indicesb2.Dispose();
 			swapChain.Dispose();
 			device11.Dispose();
 			device11 = null;
